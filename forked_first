@@ -1,0 +1,315 @@
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder
+from xgboost.sklearn import XGBClassifier
+from sklearn import cross_validation
+from sklearn import preprocessing
+
+from sklearn.decomposition import TruncatedSVD
+from sklearn.preprocessing import StandardScaler
+
+def dcg_at_k(r, k, method=1):
+    r = np.asfarray(r)[:k]
+    if r.size:
+        if method == 0:
+            return r[0] + np.sum(r[1:] / np.log2(np.arange(2, r.size + 1)))
+        elif method == 1:
+            return np.sum(r / np.log2(np.arange(2, r.size + 2)))
+        else:
+            raise ValueError('method must be 0 or 1.')
+    return 0.
+
+
+def ndcg_at_k(r, k=5, method=1):
+    dcg_max = dcg_at_k(sorted(r, reverse=True), k, method)
+    if not dcg_max:
+        return 0.
+    return dcg_at_k(r, k, method) / dcg_max
+
+
+def score_predictions(preds, truth, n_modes=5):
+    """
+    preds: pd.DataFrame
+      one row for each observation, one column for each prediction.
+      Columns are sorted from left to right descending in order of likelihood.
+    truth: pd.Series
+      one row for each obeservation.
+    """
+    assert(len(preds)==len(truth))
+    r = pd.DataFrame(0, index=preds.index, columns=preds.columns, dtype=np.float64)
+    for col in preds.columns:
+        r[col] = (preds[col] == truth) * 1.0
+
+    score = pd.Series(r.apply(ndcg_at_k, axis=1, reduce=True), name='score')
+    return score
+
+
+
+
+
+
+np.random.seed(0)
+if __name__ == '__main__':
+#Loading data
+    df_train = pd.read_csv('../input1/train_users.csv')
+    df_test = pd.read_csv('../input1/test_users.csv')
+    age_gender_bkts = pd.read_csv('../input1/age_gender_bkts.csv')
+    countries = pd.read_csv('../input1/countries.csv',nrows =100)
+    sessions = pd.read_csv('../input1/session_parsed.csv') 
+    
+    labels = df_train['country_destination'].values
+    print df_test.shape
+    
+    
+    
+    
+    # two way intraction between language and country destinition
+    
+    
+   
+    
+    
+    
+    #Creating a DataFrame with train+test data
+    df_train = df_train.drop(['country_destination'], axis=1)
+    id_test = df_test['id']
+    piv_train = df_train.shape[0]
+    df_all = pd.concat((df_train, df_test), axis=0, ignore_index=True)
+    
+    
+    sessions = sessions.replace(np.nan , 0)
+    
+    sessions_id = sessions.id.values
+    sessions = sessions.drop('id',axis =1)  
+    svd = TruncatedSVD(n_components = 250)
+    scl = StandardScaler()
+    sessions = scl.fit_transform(sessions)
+    sessions = svd.fit_transform(sessions)
+    sessions = pd.DataFrame(sessions)
+    sessions['id'] = sessions_id
+    
+    
+    print df_all.shape,'add'
+    df_all = df_all.merge(sessions, on = 'id', how = 'left')
+    print df_all.shape
+    
+    
+    #Removing id and date_first_booking
+    df_all = df_all.drop(['id', 'date_first_booking'], axis=1)
+    #Filling nan
+    df_all = df_all.fillna(-1)
+    
+    #####Feature engineering#######
+    #date_account_created
+    dac = np.vstack(df_all.date_account_created.astype(str).apply(lambda x: list(map(int, x.split('-')))).values)
+    df_all['dac_year'] = dac[:,0]
+    df_all['dac_month'] = dac[:,1]
+    df_all['dac_day'] = dac[:,2]
+    df_all = df_all.drop(['date_account_created'], axis=1)
+    
+    #timestamp_first_active
+    tfa = np.vstack(df_all.timestamp_first_active.astype(str).apply(lambda x: list(map(int, [x[:4],x[4:6],x[6:8],x[8:10],x[10:12],x[12:14]]))).values)
+    df_all['tfa_year'] = tfa[:,0]
+    df_all['tfa_month'] = tfa[:,1]
+    df_all['tfa_day'] = tfa[:,2]
+    df_all = df_all.drop(['timestamp_first_active'], axis=1)
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    #Age
+    av = df_all.age.values
+    df_all['age'] = np.where(np.logical_or(av<14, av>100), 28, av)
+    
+    #One-hot-encoding features
+    
+    
+    ohe_feats = ['gender', 'signup_method', 'signup_flow', 'language', 'affiliate_channel', 'affiliate_provider', 'first_affiliate_tracked', 'signup_app', 'first_device_type', 'first_browser']
+    for f in ohe_feats:
+        df_all_dummy = pd.get_dummies(df_all[f], prefix=f)
+        df_all = df_all.drop([f], axis=1)
+        df_all = pd.concat((df_all, df_all_dummy), axis=1)
+        #lbl = preprocessing.LabelEncoder()
+        #lbl.fit(list(df_all[f].values))
+        #df_all[f] = lbl.transform(list(df_all[f].values))
+        
+        #Splitting train and test
+    #vals = df_all.values
+    X = df_all.iloc[:piv_train]
+    le = LabelEncoder()
+    y = le.fit_transform(labels)   
+    X_test = df_all[piv_train:]
+   
+    #0.823629196319 
+    X['country_destination'] = labels
+    t1 = X.loc[X['country_destination'] == 'NDF',['country_destination','dac_month']].groupby('dac_month').agg('count').reset_index()
+    t1.rename(columns ={'country_destination':'ndf_count'},  inplace=True)
+    
+    
+        
+    t2 = X.loc[X['country_destination'] == 'US',['country_destination','dac_month']].groupby('dac_month').agg('count').reset_index()
+    t2.rename(columns ={'country_destination':'us_count'},  inplace=True)
+    t3 = X.loc[X['country_destination'] == 'other',['country_destination','dac_month']].groupby('dac_month').agg('count').reset_index()
+    t3.rename(columns ={'country_destination':'other_count'},  inplace=True)
+    t4 = X.loc[X['country_destination'] == 'FR',['country_destination','dac_month']].groupby('dac_month').agg('count').reset_index()
+    t4.rename(columns ={'country_destination':'fr_count'},  inplace=True)
+    
+    for i in [t1,t2,t3,t4]:
+        g = i
+        X = X.merge(g, on = g.columns.values[0],how = 'left')
+        X_test =  X_test.merge(g, on = g.columns.values[0] ,how = 'left')
+
+    X = X.drop('country_destination',axis = 1)
+     
+    print X.shape,X_test.shape
+    X_train, X_test1, y_train, y_test = cross_validation.train_test_split(X, y, test_size=0.3, random_state=42)
+    
+    
+  
+    score = 0.523470755297
+    D = 6 
+    L = 0.01 
+    K = 1000
+    
+    #0.01 6 10000 0.67
+    
+    for d in [0.16]:
+        for l in [0.7]:
+            for k in [150]:
+                #print d,l,k
+                #1,8,75,0.680079065649
+            
+                #gbm = ensemble.GradientBoostingClassifier(random_state = 42, learning_rate = 0.01,  min_samples_split = 30,subsample =l , max_features = 'sqrt' ,  n_estimators = k , max_depth =  d)
+                
+                gbm = XGBClassifier(max_depth=8, learning_rate=0.15, n_estimators= 75,objective='multi:softprob', subsample= 1, colsample_bytree=0.6, seed=0) 
+                gbm.fit(X_train, y_train)
+                
+                
+                y_pred = gbm.predict_proba(X_test1)
+                #print type(test_prob)
+                ids = []  #list of ids
+                cts = []  #list of countries
+                actual_val = []
+                k1 = range(X_test1.shape[0])
+                for i in range(len(k1)):
+                    idx = k1[i]
+                    ids += [idx] * 5
+                    cts += le.inverse_transform(np.argsort(y_pred[i])[::-1])[:5].tolist()   
+                cal =  np.array(cts).reshape((len(k1), 5))                   
+                d1 = pd.DataFrame({'cal_0':cal[:,0],'cal_1':cal[:,1],'cal_2':cal[:,2],'cal_3':cal[:,3],'cal_4':cal[:,4]})
+                #0.676216005249
+                comupted_score = np.mean(score_predictions(d1,le.inverse_transform(y_test)))
+                print  comupted_score,d,l,k
+                if comupted_score > score:
+                    score = comupted_score
+                    D = d
+                    L =l
+                    K = k
+    print L,D,k, score        
+    
+
+    
+
+    print 'start'
+
+
+
+
+
+
+
+
+
+    #Classifier
+    xgb = XGBClassifier(max_depth=8, learning_rate=0.15, n_estimators=75,
+                    objective='multi:softprob', subsample= 1, colsample_bytree=0.6, seed=0)                   
+    xgb.fit(X, y)
+    y_pred = xgb.predict_proba(X_test)  
+
+    #Taking the 5 classes with highest probabilities
+    ids = []  #list of ids
+    cts = []  #list of countries
+    for i in range(len(id_test)):
+        idx = id_test[i]
+        ids += [idx] * 5
+        cts += le.inverse_transform(np.argsort(y_pred[i])[::-1])[:5].tolist()
+        #print cts,'\n'
+
+    #Generate submission
+    sub = pd.DataFrame(np.column_stack((ids, cts)), columns=['id', 'country'])
+    sub.to_csv('submission_corrected.csv',index=False)
+    
+    
+    
+    
+    """
+    
+    (275562, 17)
+0.676123448644 0.15 0.6 75
+0.67625165557 0.15 0.6 100
+0.675519123979 0.15 0.6 150
+0.676400273931 0.15 0.7 75
+0.67561074229 0.15 0.7 100
+0.675459868945 0.15 0.7 150
+0.67521479963 0.15 0.75 75
+0.675070622919 0.15 0.75 100
+0.674674138934 0.15 0.75 150
+0.675528375764 0.16 0.6 75
+0.675175450604 0.16 0.6 100
+0.675078682454 0.16 0.6 150
+0.676567196981 0.16 0.7 75
+0.676628755251 0.16 0.7 100
+0.67550934685 0.16 0.7 150
+0.675281007993 0.16 0.75 75
+0.675080074135 0.16 0.75 100
+0.674157803938 0.16 0.75 150
+0.675870795837 0.17 0.6 75
+0.676040549508 0.17 0.6 100
+0.675455427443 0.17 0.6 150
+0.676176839821 0.17 0.7 75
+0.675245278598 0.17 0.7 100
+0.674668314614 0.17 0.7 150
+0.675646605136 0.17 0.75 75
+0.675529251865 0.17 0.75 100
+0.675684810609 0.17 0.75 150
+0.7 0.16 150 0.676628755251
+start
+    
+n_folds =4
+skf = list(StratifiedKFold(y, n_folds))
+score = []  
+score_prev = 0.5033013365747272
+for i, (train1, test1) in enumerate(skf):
+    print i
+    X_train = X[train1]
+    y_train = y[train1]
+    X_test1 = X[test1]
+    y_test =  y[test1]
+    gbm = XGBClassifier(max_depth=6, learning_rate=0.25, n_estimators=43,objective='multi:softprob', subsample=0.6, colsample_bytree=0.6, seed=0) 
+    gbm.fit(X_train, y_train)
+    y_pred = gbm.predict_proba(X_test1)      
+    ids = []  #list of ids
+    cts = []  #list of countries
+    actual_val = []
+    k1 = range(X_test1.shape[0])
+    for i in range(len(k1)):
+        idx = k1[i]
+        ids += [idx] * 5
+        cts += le.inverse_transform(np.argsort(y_pred[i])[::-1])[:5].tolist()   
+    cal =  np.array(cts).reshape((len(k1), 5))                   
+    d1 = pd.DataFrame({'cal_0':cal[:,0],'cal_1':cal[:,1],'cal_2':cal[:,2],'cal_3':cal[:,3],'cal_4':cal[:,4]})
+                #0.676216005249
+    comupted_score = np.mean(score_predictions(d1,le.inverse_transform(y_test)))
+    score.append(comupted_score)
+
+    
+    
+    
+    
+    """
