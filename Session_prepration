@@ -1,1 +1,127 @@
 
+
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder
+from xgboost.sklearn import XGBClassifier
+from sklearn import cross_validation
+from sklearn import preprocessing
+from collections import OrderedDict
+
+
+def parse_session_for_action(x):
+    new_list = x.tolist()[0]
+    
+    length = len(new_list)
+    new_session_action = session_action.copy()
+    
+    for i in range(length):
+        #print i,length,new_list[i],new_session_action[new_list[i]]
+        new_session_action[new_list[i]] = new_session_action[new_list[i]] + 1
+    keylist = session_action.keys()
+    keylist.sort()
+    arr = []
+    #print keylist
+    for key in keylist:
+        #print  key,new_session_action[key]
+        arr.append(new_session_action[key])
+    #print  x.tolist()[0][1],len(x.tolist()[0]),x.tolist()[0]
+    return pd.Series(arr)
+
+def parse_session_for_action_type(x):
+    new_list = x.tolist()[0]
+    
+    length = len(new_list)
+    new_session_action_type = session_action_type.copy()
+    
+    for i in range(length):
+    
+        new_session_action_type[new_list[i]] = new_session_action_type[new_list[i]] + 1
+    keylist = session_action_type.keys()
+    keylist.sort()
+    arr = []
+    #print keylist
+    for key in keylist:
+        
+        arr.append(new_session_action_type[key])
+    #print  x.tolist()[0][1],len(x.tolist()[0]),x.tolist()[0]
+    return pd.Series(arr)
+    
+    
+def parse_session_for_action_detail(x):
+    new_list = x.tolist()[0]
+    
+    length = len(new_list)
+    new_session_action_detail = session_action_detail.copy()
+    
+    for i in range(length):
+        
+        new_session_action_detail[new_list[i]] = new_session_action_detail[new_list[i]] + 1
+    keylist = session_action_detail.keys()
+    keylist.sort()
+    arr = []
+    #print keylist
+    for key in keylist:
+        
+        arr.append(new_session_action_detail[key])
+    
+    return pd.Series(arr)
+
+
+
+
+
+
+#c = k1[['actionlist']].apply(parse_session,axis = 1)
+
+if __name__ == '__main__':
+    sessions = pd.read_csv('../input1/sessions.csv')#, nrows =10) 
+    
+    
+    sessions.rename(columns = {'user_id':'id'}, inplace = True)
+   
+    for i in ['action','action_type','action_detail','device_type']:
+        k = sessions[[i,'id']].groupby('id')[i].apply(lambda x: x.tolist())
+        name = i + 'list'
+        k = pd.DataFrame({'id':k.index, name:k})
+        if i == 'action':
+            k1  = k.copy()
+        k1[name] = k[name].copy()
+        print i
+    
+    mean_elapsed = sessions[['secs_elapsed','id']].groupby('id').agg('mean').reset_index()
+    count = sessions[['secs_elapsed','id']].groupby('id').agg('count').reset_index()
+    count.rename(columns = {'secs_elapsed':'counts_in_session'},inplace = True)
+    
+    session_action = np.unique(sessions.action.values)
+    session_action = pd.DataFrame({'session_total_action':session_action,'val':0})
+    session_action = session_action.set_index('session_total_action')['val'].to_dict()
+    c_action = k1[['actionlist']].apply(parse_session_for_action,axis = 1)
+    index = c_action.index
+    
+    print 'ffff'
+    session_action_type = np.unique(sessions.action_type.values)
+    session_action_type = pd.DataFrame({'session_total_action_type':session_action_type,'val':0})
+    session_action_type = session_action_type.set_index('session_total_action_type')['val'].to_dict()
+    c_action_type = k1[['action_typelist']].apply(parse_session_for_action_type,axis = 1)
+    
+    
+    
+    
+    session_action_detail = np.unique(sessions.action_detail.values)
+    session_action_detail = pd.DataFrame({'session_total_action_detail':session_action_detail,'val':0})
+    session_action_detail= session_action_detail.set_index('session_total_action_detail')['val'].to_dict()
+    c_action_detail = k1[['action_detaillist']].apply(parse_session_for_action_detail,axis = 1)
+    
+    full_session = pd.concat((c_action, c_action_type,c_action_detail), axis=1, ignore_index=True)
+    
+    
+    
+    columns_total = list(c_action.columns) + list(c_action_type.columns) + list(c_action_detail.columns)
+    full_session.columns = columns_total
+    full_session = full_session.reset_index()
+    
+    full_session['counts_in_session'] = count['counts_in_session'].copy()
+    full_session['mean_elapsed'] = mean_elapsed['secs_elapsed'].copy()
+    
+    full_session.to_csv('session_parsed.csv',index = False)
